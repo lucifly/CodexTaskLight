@@ -1,0 +1,30 @@
+# macOS and editor metadata
+.DS_Store
+._*
+.AppleDouble/
+.idea/
+.vscode/
+
+# Local build products and scratch files
+/dist/
+/build/
+/work/
+/.codextasklight-test-*/
+.build/
+.swiftpm/
+.venv/
+.ruff_cache/
+*.app/
+*.dSYM/
+*.zip
+__pycache__/
+*.pyc
+
+# Logs, environment files and credentials
+*.log
+*.jsonl
+.env
+.env.*
+*.key
+*.pem
+*.p12

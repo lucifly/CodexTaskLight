@@ -1,0 +1,31 @@
+name: Bug report / 问题反馈
+description: 报告灯色、连接或悬浮窗问题。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: 请对截图和日志脱敏，不要提交凭据或完整聊天记录。
+  - type: input
+    id: versions
+    attributes:
+      label: 版本与环境
+      description: 应用版本、macOS 版本、Codex 桌面端版本及芯片架构。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望行为与实际表现
+      description: 灯色问题请注明是否存在并行任务或待确认请求。
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息（可选）
