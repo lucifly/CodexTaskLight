@@ -177,9 +177,15 @@ final class LocalReader: @unchecked Sendable {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 500)
+        // Older indexes have no custom-name column. Probe it without reading rows
+        // so those versions continue to display the original title.
+        var nameProbe: OpaquePointer?
+        let hasCustomName = sqlite3_prepare_v2(db, "SELECT name FROM threads LIMIT 0", -1, &nameProbe, nil) == SQLITE_OK
+        sqlite3_finalize(nameProbe)
+        let nameColumn = hasCustomName ? "name" : "NULL"
         var statement: OpaquePointer?
         let sql =
-            "SELECT id, title, rollout_path FROM threads WHERE archived = 0 AND (agent_path IS NULL OR agent_path = '') ORDER BY updated_at DESC"
+            "SELECT id, title, rollout_path, \(nameColumn) FROM threads WHERE archived = 0 AND (agent_path IS NULL OR agent_path = '') ORDER BY updated_at DESC"
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw NSError(
                 domain: "CodexTaskLight", code: 2, userInfo: [NSLocalizedDescriptionKey: "Codex 数据格式已变化，请更新工具"])
@@ -191,7 +197,9 @@ final class LocalReader: @unchecked Sendable {
             func text(_ column: Int32) -> String {
                 sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
             }
-            chats.append(Chat(id: text(0), title: text(1), path: text(2)))
+            let customName = text(3)
+            let title = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text(1) : customName
+            chats.append(Chat(id: text(0), title: title, path: text(2)))
             resultCode = sqlite3_step(statement)
         }
         guard resultCode == SQLITE_DONE else { throw CocoaError(.fileReadUnknown) }
@@ -889,7 +897,9 @@ enum FileEventTests {
             "PRAGMA journal_mode=WAL; CREATE TABLE threads(id TEXT, title TEXT, rollout_path TEXT, archived INTEGER, agent_path TEXT, updated_at INTEGER);"
         )
         func add(_ id: String, _ path: URL, _ time: Int) {
-            sql("INSERT INTO threads VALUES ('\(id)', '\(id)', '\(path.path)', 0, NULL, \(time));")
+            sql(
+                "INSERT INTO threads(id, title, rollout_path, archived, agent_path, updated_at) VALUES ('\(id)', '\(id)', '\(path.path)', 0, NULL, \(time));"
+            )
         }
         add("one", first, 1)
         let reader = LocalReader(home: root)
@@ -898,6 +908,7 @@ enum FileEventTests {
         final class Inbox: @unchecked Sendable {
             let lock = NSLock()
             var latest: AutomaticSelection?
+            var tasks: [TaskOption] = []
             var error: String?
         }
         let inbox = Inbox()
@@ -906,6 +917,7 @@ enum FileEventTests {
             let selection = snapshot.selection
             inbox.lock.lock()
             inbox.latest = selection
+            inbox.tasks = snapshot.tasks
             inbox.error = problem
             inbox.lock.unlock()
             FileHandle.standardOutput.write(
@@ -937,6 +949,16 @@ enum FileEventTests {
                 return inbox.latest?.sample?.chat.id == id && inbox.latest?.sample?.reading.state == state
             }
         }
+        func rename(_ id: String, to name: String?, expected: String) {
+            let value = name.map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" } ?? "NULL"
+            sql("UPDATE threads SET name = \(value) WHERE id = '\(id)';")
+            waitUntil {
+                inbox.lock.lock()
+                defer { inbox.lock.unlock() }
+                return inbox.latest?.sample?.chat.id == id && inbox.latest?.sample?.chat.title == expected
+                    && inbox.tasks.first(where: { $0.id == id })?.title == expected
+            }
+        }
         func line(_ type: String, timestamp: String? = nil) -> Data {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -956,6 +978,7 @@ enum FileEventTests {
         monitor.start()
         defer { monitor.stop() }
         wait("one", .unknown)
+        precondition(monitor.queue.sync { monitor.known.first?.title == "one" }, "Legacy title fallback failed")
         append(line("task_started"), to: first)
         wait("one", .running)
         let finished = line("task_complete")
@@ -988,6 +1011,21 @@ enum FileEventTests {
         // incoming events continue to update the pin without switching targets.
         monitor.setPreference(TrackingPreference(mode: .manual, manualTaskID: "one"))
         wait("one", .completed)
+        // Rename only the database row: both the current title and chooser must
+        // update on the index event without requiring any new log output.
+        let beforeRename = monitor.queue.sync { reader.bytesRead }
+        sql("ALTER TABLE threads ADD COLUMN name TEXT;")
+        rename("one", to: "自定义任务名称", expected: "自定义任务名称")
+        rename("one", to: "Second name with 'quotes'", expected: "Second name with 'quotes'")
+        rename("one", to: " \t\n", expected: "one")
+        rename("one", to: "Named task", expected: "Named task")
+        rename("one", to: "", expected: "one")
+        rename("one", to: "Name before reset", expected: "Name before reset")
+        rename("one", to: nil, expected: "one")
+        precondition(monitor.queue.sync { reader.bytesRead == beforeRename }, "Rename reread task log contents")
+        precondition(
+            monitor.queue.sync { monitor.preference.manualTaskID == "one" }, "Rename changed the pinned target")
+        report("PASS: custom-name priority, repeated live rename, empty/whitespace/NULL fallback and legacy schema")
         append(line("turn_aborted"), to: second)
         waitUntil { monitor.queue.sync { monitor.samples["two"]?.reading.state == .failed } }
         inbox.lock.lock()
@@ -1010,6 +1048,9 @@ enum FileEventTests {
         append(line("task_started"), to: second)
         wait("two", .running)
         report("PASS: manual pin, incoming updates, unavailable/returned target and switching back to automatic")
+        rename("two", to: "自动模式的新名称", expected: "自动模式的新名称")
+        wait("two", .running)
+        report("PASS: automatic selection and task list receive database-only renames")
         if stress {
             func descriptors() -> Int { (0..<64).filter { fcntl(Int32($0), F_GETFD) >= 0 }.count }
             let baseline = descriptors()
