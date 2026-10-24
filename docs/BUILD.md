@@ -63,7 +63,7 @@ open dist/CodexTaskLight.app
 ./dist/CodexTaskLight.app/Contents/MacOS/CodexTaskLight --file-test
 ```
 
-文件事件检查会在当前工作目录创建并清理 `.codextasklight-test-*` 合成任务目录，验证追加、分段写入、新任务发现、替换与截断；不会修改真实 Codex 任务，也不会接入真实状态订阅。请从仓库目录运行；macOS 可能不向临时或缓存目录发送 FSEvents 事件。
+文件事件检查会在当前工作目录创建并清理 `.codextasklight-test-*` 合成任务目录，验证追加、分段写入、新任务发现、替换与截断，以及手动目标固定、归档后不可用和切回自动模式；不会修改真实 Codex 任务，也不会接入真实状态订阅。请从仓库目录运行；macOS 可能不向临时或缓存目录发送 FSEvents 事件。
 
 大量历史任务与句柄限制回归检查：
 

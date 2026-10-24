@@ -4,7 +4,7 @@ import Darwin
 import SQLite3
 import SwiftUI
 
-enum TaskState: String {
+enum TaskState: String, Sendable {
     case running, waiting, completed, failed, unknown
     var title: String {
         switch self {
@@ -24,12 +24,12 @@ enum TaskState: String {
         }
     }
 }
-struct Chat: Identifiable, Equatable {
+struct Chat: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let path: String
 }
-struct Reading: Equatable {
+struct Reading: Equatable, Sendable {
     var state: TaskState = .unknown
     var lastEvent: Date?
     var pendingQuestionIDs = Set<String>()
@@ -254,11 +254,11 @@ final class LocalReader: @unchecked Sendable {
 
 }
 
-struct TaskSample {
+struct TaskSample: Sendable {
     let chat: Chat
     let reading: Reading
 }
-struct AutomaticSelection {
+struct AutomaticSelection: Sendable {
     let sample: TaskSample?
     let runningCount: Int
     static func select(_ samples: [TaskSample]) -> AutomaticSelection {
@@ -272,6 +272,59 @@ struct AutomaticSelection {
         }?.element
         return AutomaticSelection(sample: newest, runningCount: running.count)
     }
+}
+
+enum TrackingMode: String, Codable, CaseIterable, Sendable {
+    case automatic
+    case manual
+}
+
+struct TrackingPreference: Codable, Equatable, Sendable {
+    var mode: TrackingMode = .automatic
+    var manualTaskID: String?
+    static let defaultsKey = "trackingPreference"
+
+    static func restore(_ data: Data?) -> TrackingPreference {
+        guard let data, let preference = try? PropertyListDecoder().decode(Self.self, from: data) else {
+            return TrackingPreference()
+        }
+        return preference
+    }
+
+    func save(to defaults: UserDefaults) {
+        guard let data = try? PropertyListEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.defaultsKey)
+    }
+
+    func select(_ samples: [TaskSample]) -> AutomaticSelection {
+        if mode == .automatic { return AutomaticSelection.select(samples) }
+        let sample = samples.first { $0.chat.id == manualTaskID }
+        return AutomaticSelection(sample: sample, runningCount: sample?.reading.state == .running ? 1 : 0)
+    }
+
+    var emptyTitle: String {
+        if mode == .automatic { return "尚未发现任务" }
+        return manualTaskID == nil ? "请选择要跟踪的任务" : "所选任务不可用"
+    }
+
+    var emptyDetail: String {
+        if mode == .automatic { return "没有找到本机任务记录" }
+        return manualTaskID == nil ? "在下方搜索并选择一个本机任务" : "所选任务已归档或不在本机列表中，请重新选择"
+    }
+}
+
+struct TaskOption: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let state: TaskState
+    var displayTitle: String { title.isEmpty ? "未命名任务" : title }
+}
+
+struct TrackingSnapshot: Sendable {
+    let preference: TrackingPreference
+    let preferenceRevision: Int
+    let selection: AutomaticSelection
+    let tasks: [TaskOption]
 }
 
 // One recursive stream covers every task without opening a descriptor per log.
@@ -319,11 +372,84 @@ final class DirectoryEvents {
     deinit { stop() }
 }
 
+// SQLite WAL appends can be coalesced by FSEvents. Keep at most three vnode
+// watches (home, newest database, its WAL) for prompt task-list changes.
+final class IndexEvents {
+    final class Watch {
+        let source: any DispatchSourceFileSystemObject
+        let inode: UInt64
+        let device: Int32
+
+        init(source: any DispatchSourceFileSystemObject, inode: UInt64, device: Int32) {
+            self.source = source
+            self.inode = inode
+            self.device = device
+        }
+    }
+
+    private var watches: [String: Watch] = [:]
+
+    func sync(root: URL, queue: DispatchQueue, onChange: @escaping () -> Void) throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        let database = names.filter { $0.hasPrefix("state_") && $0.hasSuffix(".sqlite") }
+            .sorted { $0.localizedStandardCompare($1) == .orderedDescending }.first
+        var desired = [root.path]
+        if let database {
+            desired.append(root.appendingPathComponent(database).path)
+            desired.append(root.appendingPathComponent(database + "-wal").path)
+        }
+        for path in Array(watches.keys) {
+            var info = stat()
+            if !desired.contains(path) || stat(path, &info) != 0
+                || watches[path]?.inode != info.st_ino || watches[path]?.device != info.st_dev
+            {
+                watches.removeValue(forKey: path)?.source.cancel()
+            }
+        }
+        for path in desired where watches[path] == nil {
+            let fd = open(path, O_EVTONLY | O_CLOEXEC)
+            if fd < 0 {
+                if errno == ENOENT { continue }
+                throw Self.unavailable
+            }
+            var info = stat()
+            guard fstat(fd, &info) == 0 else {
+                close(fd)
+                throw Self.unavailable
+            }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .extend, .rename, .delete, .revoke], queue: queue
+            )
+            let watch = Watch(source: source, inode: info.st_ino, device: info.st_dev)
+            watches[path] = watch
+            source.setCancelHandler { close(fd) }
+            source.setEventHandler { [weak self, weak watch] in
+                guard let watch else { return }
+                if !watch.source.data.intersection([.rename, .delete, .revoke]).isEmpty {
+                    self?.watches.removeValue(forKey: path)?.source.cancel()
+                }
+                onChange()
+            }
+            source.activate()
+        }
+    }
+
+    static var unavailable: NSError {
+        NSError(domain: "CodexTaskLight", code: 4, userInfo: [NSLocalizedDescriptionKey: "无法启动任务索引监听，正在重试"])
+    }
+
+    func stop() {
+        for watch in watches.values { watch.source.cancel() }
+        watches.removeAll()
+    }
+}
+
 // All filesystem callbacks, cursor mutations and coalesced reads use one serial queue.
 final class EventMonitor: @unchecked Sendable {
     let queue = DispatchQueue(label: "local.codextasklight.events", qos: .utility)
     let reader: LocalReader
     let directoryEvents = DirectoryEvents()
+    let indexEvents = IndexEvents()
     var restartEvents = false
     var watchRetry: DispatchWorkItem?
     var watchBackoff: Double = 1
@@ -334,12 +460,17 @@ final class EventMonitor: @unchecked Sendable {
     var readAll = false
     var pending: DispatchWorkItem?
     var expiry: DispatchWorkItem?
-    var onUpdate: (@Sendable (AutomaticSelection, String?) -> Void)?
+    var onUpdate: (@Sendable (TrackingSnapshot, String?) -> Void)?
+    var preference: TrackingPreference
+    var preferenceRevision = 0
     var useLive: Bool
     lazy var live = LiveStatusClient(queue: queue)
-    init(reader: LocalReader = LocalReader(), useLive: Bool = true) {
+    init(
+        reader: LocalReader = LocalReader(), useLive: Bool = true, preference: TrackingPreference = TrackingPreference()
+    ) {
         self.reader = reader
         self.useLive = useLive
+        self.preference = preference
     }
     func start() {
         queue.async { [self] in
@@ -351,6 +482,13 @@ final class EventMonitor: @unchecked Sendable {
         }
     }
     func refresh() { queue.async { [self] in schedule(index: true, all: true) } }
+    func setPreference(_ preference: TrackingPreference, revision: Int = 0) {
+        queue.async { [self] in
+            self.preference = preference
+            self.preferenceRevision = revision
+            publish()
+        }
+    }
     func syncWatches() throws {
         if restartEvents {
             directoryEvents.stop()
@@ -358,6 +496,7 @@ final class EventMonitor: @unchecked Sendable {
         }
         directoryEvents.onEvents = { [weak self] events in self?.filesChanged(events) }
         try directoryEvents.start(root: reader.home.path, queue: queue)
+        try indexEvents.sync(root: reader.home, queue: queue) { [weak self] in self?.schedule(index: true) }
         watchRetry?.cancel()
         watchRetry = nil
         watchBackoff = 1
@@ -438,16 +577,25 @@ final class EventMonitor: @unchecked Sendable {
             }
             publish()
         } catch {
-            onUpdate?(AutomaticSelection.select([]), error.localizedDescription)
-            if directoryEvents.stream == nil { retryWatching() }
+            publish(error: error.localizedDescription)
+            let problem = error as NSError
+            if directoryEvents.stream == nil || (problem.domain == "CodexTaskLight" && problem.code == 4) {
+                retryWatching()
+            }
         }
     }
-    func publish() {
+    func publish(error: String? = nil) {
         let current = known.map { chat in
             let fallback = (samples[chat.id]?.reading ?? Reading()).expiring()
             return TaskSample(chat: chat, reading: useLive ? live.reading(for: chat.id, fallback: fallback) : fallback)
         }
-        onUpdate?(AutomaticSelection.select(current), nil)
+        let snapshot = TrackingSnapshot(
+            preference: preference,
+            preferenceRevision: preferenceRevision,
+            selection: preference.select(current),
+            tasks: current.map { TaskOption(id: $0.chat.id, title: $0.chat.title, state: $0.reading.state) }
+        )
+        onUpdate?(snapshot, error)
         expiry?.cancel()
         expiry = nil
         // A one-shot deadline marks silence as unknown, without polling any files.
@@ -474,6 +622,7 @@ final class EventMonitor: @unchecked Sendable {
             watchRetry?.cancel()
             watchRetry = nil
             directoryEvents.stop()
+            indexEvents.stop()
         }
     }
 }
@@ -484,30 +633,132 @@ final class Monitor: ObservableObject {
     @Published var selected = ""
     @Published var currentTitle = "尚未发现任务"
     @Published var runningCount = 0
+    @Published private(set) var trackingPreference: TrackingPreference
+    @Published private(set) var tasks: [TaskOption] = []
+    @Published var taskSearchText = ""
     var onChange: (() -> Void)?
-    let events = EventMonitor()
+    let events: EventMonitor
+    private let defaults: UserDefaults
+    private var preferenceRevision = 0
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let preference = TrackingPreference.restore(defaults.data(forKey: TrackingPreference.defaultsKey))
+        trackingPreference = preference
+        events = EventMonitor(preference: preference)
+        currentTitle = preference.emptyTitle
+    }
+
     func start() {
-        events.onUpdate = { [weak self] selection, error in
+        events.onUpdate = { [weak self] snapshot, error in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                // Discard queued updates from before a mode/target change.
+                guard let self, snapshot.preference == self.trackingPreference,
+                    snapshot.preferenceRevision == self.preferenceRevision
+                else { return }
+                let selection = snapshot.selection
                 let reading =
-                    error.map { Reading(detail: $0) } ?? selection.sample?.reading ?? Reading(detail: "没有找到本机任务记录")
+                    error.map { Reading(detail: $0) } ?? selection.sample?.reading
+                    ?? Reading(detail: snapshot.preference.emptyDetail)
                 if self.reading != reading { self.reading = reading }
                 let selected = selection.sample?.chat.id ?? ""
                 if self.selected != selected { self.selected = selected }
-                let title = selection.sample?.chat.title ?? "尚未发现任务"
+                let title = selection.sample?.chat.title ?? snapshot.preference.emptyTitle
                 if self.currentTitle != title { self.currentTitle = title }
                 if self.runningCount != selection.runningCount { self.runningCount = selection.runningCount }
+                if self.tasks != snapshot.tasks { self.tasks = snapshot.tasks }
                 self.onChange?()
             }
         }
         events.start()
     }
     func refresh() { events.refresh() }
+
+    func setMode(_ mode: TrackingMode) {
+        updatePreference(TrackingPreference(mode: mode, manualTaskID: trackingPreference.manualTaskID))
+    }
+
+    func followTask(_ id: String) {
+        guard tasks.contains(where: { $0.id == id }) else { return }
+        updatePreference(TrackingPreference(mode: .manual, manualTaskID: id))
+    }
+
+    private func updatePreference(_ preference: TrackingPreference) {
+        guard preference != trackingPreference else { return }
+        preferenceRevision += 1
+        trackingPreference = preference
+        preference.save(to: defaults)
+        selected = ""
+        reading = Reading(detail: "正在切换跟踪任务")
+        currentTitle =
+            preference.mode == .manual
+            ? tasks.first(where: { $0.id == preference.manualTaskID })?.displayTitle ?? preference.emptyTitle
+            : "正在自动选择任务"
+        runningCount = 0
+        onChange?()
+        events.setPreference(preference, revision: preferenceRevision)
+    }
 }
 
 struct StatusPanel: View {
     @ObservedObject var monitor: Monitor
+    private var matchingTasks: [TaskOption] {
+        let query = monitor.taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty
+            ? monitor.tasks : monitor.tasks.filter { $0.displayTitle.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var trackingControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("跟踪方式", selection: Binding(get: { monitor.trackingPreference.mode }, set: monitor.setMode)) {
+                Text("自动识别").tag(TrackingMode.automatic)
+                Text("手动指定").tag(TrackingMode.manual)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if monitor.trackingPreference.mode == .manual {
+                TextField("搜索任务名称", text: $monitor.taskSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("搜索本机任务")
+                if monitor.tasks.isEmpty {
+                    Text("尚未发现可选择的本机任务").font(.caption).foregroundStyle(.secondary)
+                } else if matchingTasks.isEmpty {
+                    Text("没有匹配的任务").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(matchingTasks) { task in
+                                Button {
+                                    monitor.followTask(task.id)
+                                } label: {
+                                    HStack(spacing: 7) {
+                                        Circle().fill(Color(nsColor: task.state.color)).frame(width: 6, height: 6)
+                                        Text(task.displayTitle).font(.system(size: 12)).lineLimit(1)
+                                        Spacer(minLength: 0)
+                                        if task.id == monitor.trackingPreference.manualTaskID {
+                                            Image(systemName: "checkmark").font(.caption)
+                                        }
+                                    }
+                                    .padding(6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        task.id == monitor.trackingPreference.manualTaskID
+                                            ? Color.accentColor.opacity(0.10) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6)
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(task.displayTitle + " · " + task.state.title)
+                                .accessibilityLabel(task.displayTitle + "，" + task.state.title)
+                            }
+                        }
+                    }.frame(height: 132)
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -534,11 +785,13 @@ struct StatusPanel: View {
                 Spacer()
                 Text(monitor.reading.state.title).font(.system(size: 13, weight: .medium))
             }.padding(16).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
+            trackingControls
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("自动跟踪任务").font(.caption).foregroundStyle(.secondary)
+                    Text(monitor.trackingPreference.mode == .automatic ? "自动跟踪任务" : "手动跟踪任务")
+                        .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    if monitor.runningCount > 1 {
+                    if monitor.trackingPreference.mode == .automatic && monitor.runningCount > 1 {
                         Text("\(monitor.runningCount) 个执行中").font(.caption).foregroundStyle(.orange)
                     }
                 }
@@ -555,7 +808,8 @@ struct StatusPanel: View {
             Text("黄：执行中  ·  绿：完成  ·  红：异常或中断\n红灯也表示等待确认或审批；处理后恢复黄灯。")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineSpacing(5)
             HStack {
-                Text("实时状态 · 自动跟踪").font(.caption2).foregroundStyle(.tertiary)
+                Text(monitor.trackingPreference.mode == .automatic ? "实时状态 · 自动识别" : "实时状态 · 手动指定")
+                    .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("打开 Codex") {
                     NSWorkspace.shared.open(URL(string: "codex://threads/" + monitor.selected)!)
@@ -648,7 +902,8 @@ enum FileEventTests {
         }
         let inbox = Inbox()
         func report(_ text: String) { FileHandle.standardOutput.write(Data((text + "\n").utf8)) }
-        monitor.onUpdate = { selection, problem in
+        monitor.onUpdate = { snapshot, problem in
+            let selection = snapshot.selection
             inbox.lock.lock()
             inbox.latest = selection
             inbox.error = problem
@@ -729,6 +984,32 @@ enum FileEventTests {
         // Truncation in place must reset the cursor as well.
         try! line("task_started").write(to: second)
         wait("two", .running)
+        // Pin a completed task while another task is running, then verify that
+        // incoming events continue to update the pin without switching targets.
+        monitor.setPreference(TrackingPreference(mode: .manual, manualTaskID: "one"))
+        wait("one", .completed)
+        append(line("turn_aborted"), to: second)
+        waitUntil { monitor.queue.sync { monitor.samples["two"]?.reading.state == .failed } }
+        inbox.lock.lock()
+        precondition(inbox.latest?.sample?.chat.id == "one")
+        inbox.lock.unlock()
+        append(line("task_started"), to: first)
+        wait("one", .running)
+        append(line("task_complete"), to: first)
+        wait("one", .completed)
+        sql("UPDATE threads SET archived = 1 WHERE id = 'one';")
+        waitUntil {
+            inbox.lock.lock()
+            defer { inbox.lock.unlock() }
+            return inbox.latest?.sample == nil
+        }
+        precondition(monitor.queue.sync { monitor.preference.mode == .manual })
+        sql("UPDATE threads SET archived = 0 WHERE id = 'one';")
+        wait("one", .completed)
+        monitor.setPreference(TrackingPreference())
+        append(line("task_started"), to: second)
+        wait("two", .running)
+        report("PASS: manual pin, incoming updates, unavailable/returned target and switching back to automatic")
         if stress {
             func descriptors() -> Int { (0..<64).filter { fcntl(Int32($0), F_GETFD) >= 0 }.count }
             let baseline = descriptors()
@@ -963,6 +1244,26 @@ struct CodexTaskLightApp {
             precondition(AutomaticSelection.select([]).sample == nil)
             let unreadable = TaskSample(chat: b, reading: Reading())
             precondition(AutomaticSelection.select([unreadable, activeA]).sample?.chat.id == "a")
+            let manualA = TrackingPreference(mode: .manual, manualTaskID: "a")
+            precondition(manualA.select([doneA, activeB]).sample?.chat.id == "a")
+            precondition(manualA.select([doneA, waitingB]).sample?.reading.state == .completed)
+            precondition(manualA.select([activeA, waitingB]).sample?.reading.state == .running)
+            let failedA = TaskSample(chat: a, reading: Reading(state: .failed, lastEvent: newer))
+            precondition(manualA.select([failedA, activeB]).sample?.reading.state == .failed)
+            precondition(manualA.select([activeB]).sample == nil)
+            precondition(manualA.select([]).sample == nil)
+            precondition(TrackingPreference(mode: .manual).select([activeA, activeB]).sample == nil)
+            let autoAgain = TrackingPreference(mode: .automatic, manualTaskID: "a")
+            precondition(autoAgain.select([activeA, waitingB]).sample?.chat.id == "b")
+            for preference in [TrackingPreference(), manualA, autoAgain] {
+                let data = try! PropertyListEncoder().encode(preference)
+                precondition(TrackingPreference.restore(data) == preference)
+            }
+            precondition(TrackingPreference.restore(nil) == TrackingPreference())
+            precondition(TrackingPreference.restore(Data("invalid".utf8)) == TrackingPreference())
+            print(
+                "PASS: manual target selection, no fallback for missing target, automatic handoff and saved preference restoration"
+            )
             print(
                 "PASS: lifecycle parsing, automatic running selection, concurrent tasks, completion handoff, empty and unreadable records"
             )
