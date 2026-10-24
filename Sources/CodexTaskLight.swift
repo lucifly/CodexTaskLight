@@ -643,6 +643,7 @@ final class Monitor: ObservableObject {
     @Published var runningCount = 0
     @Published private(set) var trackingPreference: TrackingPreference
     @Published private(set) var tasks: [TaskOption] = []
+    @Published private(set) var skin: LightSkin
     @Published var taskSearchText = ""
     var onChange: (() -> Void)?
     let events: EventMonitor
@@ -651,6 +652,7 @@ final class Monitor: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        skin = LightSkin.restore(defaults.string(forKey: LightSkin.defaultsKey))
         let preference = TrackingPreference.restore(defaults.data(forKey: TrackingPreference.defaultsKey))
         trackingPreference = preference
         events = EventMonitor(preference: preference)
@@ -681,6 +683,13 @@ final class Monitor: ObservableObject {
         events.start()
     }
     func refresh() { events.refresh() }
+
+    func setSkin(_ skin: LightSkin) {
+        guard skin != self.skin else { return }
+        self.skin = skin
+        defaults.set(skin.rawValue, forKey: LightSkin.defaultsKey)
+        onChange?()
+    }
 
     func setMode(_ mode: TrackingMode) {
         updatePreference(TrackingPreference(mode: mode, manualTaskID: trackingPreference.manualTaskID))
@@ -812,8 +821,17 @@ struct StatusPanel: View {
                         .tertiary)
                 }
             }
+            HStack {
+                Text("悬浮窗外观").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Picker("悬浮窗外观", selection: Binding(get: { monitor.skin }, set: monitor.setSkin)) {
+                    ForEach(LightSkin.allCases) { skin in Text(skin.title).tag(skin) }
+                }
+                .labelsHidden()
+                .frame(width: 155)
+            }
             Divider()
-            Text("黄：执行中  ·  绿：完成  ·  红：异常或中断\n红灯也表示等待确认或审批；处理后恢复黄灯。")
+            Text(monitor.skin.legend)
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineSpacing(5)
             HStack {
                 Text(monitor.trackingPreference.mode == .automatic ? "实时状态 · 自动识别" : "实时状态 · 手动指定")
@@ -840,12 +858,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        if let index = CommandLine.arguments.firstIndex(of: "--skin"), index + 1 < CommandLine.arguments.count,
+            let skin = LightSkin(rawValue: CommandLine.arguments[index + 1])
+        {
+            monitor.setSkin(skin)
+        }
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: StatusPanel(monitor: monitor))
-        floating = FloatingLightController(onClick: { [weak self] in
-            guard let self, let view = self.floating?.light else { return }
-            self.showDetails(from: view)
-        })
+        floating = FloatingLightController(
+            skin: monitor.skin,
+            onClick: { [weak self] in
+                guard let self, let view = self.floating?.light else { return }
+                self.showDetails(from: view)
+            })
+        floating?.light.onSkinSelected = { [weak self] skin in self?.monitor.setSkin(skin) }
         monitor.onChange = { [weak self] in self?.update() }
         update()
         monitor.start()
@@ -857,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func update() {
-        floating?.update(state: monitor.reading.state, title: monitor.currentTitle)
+        floating?.update(state: monitor.reading.state, title: monitor.currentTitle, skin: monitor.skin)
     }
     func showDetails(from view: NSView) {
         if popover.isShown {
@@ -1130,6 +1156,9 @@ struct CodexTaskLightApp {
             return
         }
         if CommandLine.arguments.contains("--test") {
+            precondition(LightSkin.restore(nil) == .classic)
+            precondition(LightSkin.restore("unknown") == .classic)
+            for skin in LightSkin.allCases { precondition(LightSkin.restore(skin.rawValue) == skin) }
             let now = ISO8601DateFormatter().string(from: Date())
             func event(_ type: String) -> String {
                 let data = try! JSONSerialization.data(withJSONObject: [
