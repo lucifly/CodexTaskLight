@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="156" height="24" role="img" aria-labelledby="title">
+  <title id="title">macOS: 13.0 deployment target</title>
+  <clipPath id="round"><rect width="156" height="24" rx="5"/></clipPath>
+  <g clip-path="url(#round)">
+    <path fill="#334155" d="M0 0h56v24H0z"/>
+    <path fill="#475569" d="M56 0h100v24H56z"/>
+  </g>
+  <g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" text-anchor="middle">
+    <text x="28" y="16">macOS</text>
+    <text x="106" y="16">target 13.0+</text>
+  </g>
+</svg>
