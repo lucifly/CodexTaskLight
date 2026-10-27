@@ -14,6 +14,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/lucifly/CodexTaskLight/releases/latest">下载应用</a> ·
   <a href="#效果预览">效果预览</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="docs/USAGE.md">使用说明</a> ·
@@ -35,7 +36,19 @@ CodexTaskLight 是一个非官方的 macOS 原生小工具。它在桌面显示�
 
 ## 快速开始
 
-当前本地构建版本为 **2.6**，安装方式为从源码构建。仓库尚无可下载的 GitHub Release 安装包，源码归档不等于编译后的应用。
+当前版本为 **2.6**。可直接下载编译好的应用，无需安装开发工具，也可以从源码构建。
+
+### 下载应用
+
+**[下载 CodexTaskLight v2.6 · macOS Apple Silicon](https://github.com/lucifly/CodexTaskLight/releases/download/v2.6/CodexTaskLight-v2.6-macOS-arm64.zip)**
+
+1. 下载并解压 ZIP，将 `CodexTaskLight.app` 拖入「应用程序」文件夹。
+2. 打开 Codex 桌面端，再双击 CodexTaskLight。当前只有悬浮窗，没有菜单栏或 Dock 图标。
+3. 升级前先右键退出旧版，再替换应用。
+
+发布包使用 **ad hoc 本地签名，未经过 Developer ID 签名或 Apple 公证**，macOS 可能阻止首次打开。确认来源和文件校验值后，可按 [Apple 官方说明](https://support.apple.com/zh-cn/102445)为该应用单独允许打开。
+
+[发布说明](https://github.com/lucifly/CodexTaskLight/releases/tag/v2.6)中提供系统要求与验证结果；[SHA-256 校验文件](https://github.com/lucifly/CodexTaskLight/releases/download/v2.6/SHA256SUMS.txt)用于核对下载完整性。GitHub 自动生成的 `Source code` 附件是源码，不是应用安装包。
 
 ### 环境要求
 
@@ -44,7 +57,7 @@ CodexTaskLight 是一个非官方的 macOS 原生小工具。它在桌面显示�
 | Mac | Apple Silicon / `arm64`；当前构建不包含 Intel 或 Universal 版本 |
 | macOS | 部署目标为 macOS 13.0，尚未逐版本验证 |
 | Codex | 同一用户下已运行的 ChatGPT/Codex 桌面端，以及可读的默认 `~/.codex` 数据目录 |
-| 构建工具 | Xcode Command Line Tools 或 Xcode；重新生成图标时还需要 Python 3 |
+| 构建工具 | 仅源码构建需要 Xcode Command Line Tools 或 Xcode；重新生成图标时还需要 Python 3 |
 | 监控范围 | 本机未归档的主任务；不包含子代理、云端执行或其他电脑的任务 |
 
 **兼容性说明：** 项目依赖桌面端内部 IPC 协议和本地数据格式，并非官方稳定 API。当前实现按状态协议 v11 适配，桌面端更新后可能需要调整。仅安装 Codex CLI 不等于具备所需的桌面端状态通道。
@@ -60,7 +73,7 @@ open dist/CodexTaskLight.app
 
 也可以在访达中双击 `build.command`，构建完成后双击 `dist/CodexTaskLight.app`。先打开 Codex 桌面端，再启动本工具。
 
-应用使用本地临时签名（ad hoc），未配置 Developer ID 签名或 Apple 公证。面向他人分发前，应另外完成发布和签名验证。`dist/` 是本地构建产物，已从 Git 提交范围排除。
+源码构建同样使用 ad hoc 签名。`dist/` 是本地构建产物，已从 Git 提交范围排除；打包应用通过 GitHub Release 附件提供。
 
 <details>
 <summary><strong>开发工具安装与本地升级</strong></summary>

@@ -127,4 +127,14 @@ README 的预览图需要另行同步更新。默认构建会在图标不存在�
 
 `build.command` 中的 `CFBundleShortVersionString` 和 `CFBundleVersion` 是当前版本来源。`CFBundleIdentifier` 沿用 `local.codex.statuslight`，用于保留已有用户偏好，不因应用显示名称变化而更换。
 
-`dist/`、应用包和压缩包不纳入源码提交。若后续发布二进制，可作为 GitHub Release 附件上传；发布前应核实内容、签名及公证状态。仓库当前不包含自动上传或发布流程。
+`dist/`、应用包和压缩包不纳入源码提交。编译后的应用通过 [GitHub Release](https://github.com/lucifly/CodexTaskLight/releases/latest) 附件提供，仓库当前不包含自动上传或发布流程。
+
+v2.6 发布包为 `CodexTaskLight-v2.6-macOS-arm64.zip`，包含应用、安装说明与 MIT 许可证，另附 `SHA256SUMS.txt`。发布前检查编译、代码风格、状态识别、真实文件事件和资源限制，并验证压缩包解压后的签名与状态检查。发布包采用 ad hoc 本地签名，未配置 Developer ID 签名或 Apple 公证。
+
+将 ZIP 和校验文件下载到同一目录后，可以核对完整性：
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+校验值用于检查文件是否与发布附件一致，不替代开发者身份签名或 Apple 公证。

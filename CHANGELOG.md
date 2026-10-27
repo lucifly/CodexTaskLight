@@ -1,8 +1,8 @@
 # 变更记录
 
-## Unreleased
+## 2.6 — 2026-10-27
 
-当前本地构建版本为 **2.6**；此处不表示已有对应 GitHub Release 或版本标签。
+首次发布 [GitHub Release v2.6](https://github.com/lucifly/CodexTaskLight/releases/tag/v2.6)，提供 Apple Silicon 应用 ZIP、安装说明、MIT 许可证及 SHA-256 校验文件。应用版本为 2.6，构建号为 27；采用 ad hoc 签名，未经过 Apple 公证。
 
 - 新增万圣节皮肤：深紫外壳、蛛网、红色幽灵、橙色南瓜和绿色蝙蝠；支持在详情和右键菜单中切回经典外观，并在本地记住选择。
 - 新增经典 / 万圣节各状态的对比预览图，并在 README 展示。

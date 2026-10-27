@@ -4,7 +4,11 @@
 
 ## 启动与退出
 
-先打开 Codex 桌面端，再打开 `dist/CodexTaskLight.app`。应用只显示竖款悬浮窗，不创建菜单栏或 Dock 图标。
+从 [GitHub Release](https://github.com/lucifly/CodexTaskLight/releases/latest) 下载 `CodexTaskLight-v2.6-macOS-arm64.zip`，解压后将 `CodexTaskLight.app` 拖入「应用程序」文件夹。需要 Apple Silicon Mac；源码构建的应用位于 `dist/CodexTaskLight.app`。
+
+先打开 Codex 桌面端，再打开 CodexTaskLight。应用只显示竖款悬浮窗，不创建菜单栏或 Dock 图标。
+
+发布包使用 ad hoc 本地签名，未经过 Developer ID 签名或 Apple 公证，macOS 可能阻止首次打开。确认下载来源和 SHA-256 校验值后，可参考 [Apple 官方说明](https://support.apple.com/zh-cn/102445)，在尝试打开后通过「系统设置 → 隐私与安全性 → 仍要打开」为该应用单独允许启动。
 
 右键悬浮窗，选择“退出 CodexTaskLight”即可结束运行。
 
@@ -79,4 +83,4 @@
 
 ### 如何升级本地构建
 
-先右键退出应用，再更新源码并运行 `./build.command`，最后重新打开应用。应用标识保持不变时，保存的位置会继续使用。
+先右键退出应用，再更新源码并运行 `./build.command`，最后重新打开应用。使用 Release 安装包时，先退出旧版，再用新包中的应用替换原应用。应用标识保持不变时，保存的位置会继续使用。
