@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="276" height="32" role="img" aria-labelledby="title">
+  <title id="title">Download CodexTaskLight v2.6 for macOS arm64</title>
+  <clipPath id="round"><rect width="276" height="32" rx="6"/></clipPath>
+  <g clip-path="url(#round)">
+    <path fill="#166534" d="M0 0h152v32H0z"/>
+    <path fill="#15803d" d="M152 0h124v32H152z"/>
+  </g>
+  <g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="12" text-anchor="middle">
+    <text x="76" y="21">Download v2.6</text>
+    <text x="214" y="21">macOS arm64</text>
+  </g>
+</svg>

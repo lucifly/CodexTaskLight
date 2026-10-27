@@ -4,6 +4,8 @@
 
 <h1 align="center">CodexTaskLight</h1>
 
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+
 <p align="center"><strong>用一盏悬浮红绿灯，查看 Codex 本机任务状态。</strong></p>
 <p align="center">A small, draggable traffic light for local Codex task status on macOS.</p>
 
@@ -11,6 +13,10 @@
   <a href="#环境要求"><img src="docs/images/badges/macos.svg" alt="macOS 13.0 部署目标，尚未逐版本验证"></a>
   <a href="#环境要求"><img src="docs/images/badges/arm64.svg" alt="仅构建 Apple Silicon arm64 版本"></a>
   <a href="LICENSE"><img src="docs/images/badges/license.svg" alt="MIT 许可证"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lucifly/CodexTaskLight/releases/download/v2.6/CodexTaskLight-v2.6-macOS-arm64.zip"><img src="docs/images/badges/download.svg" alt="下载 CodexTaskLight v2.6，适用于 macOS Apple Silicon"></a>
 </p>
 
 <p align="center">
@@ -23,6 +29,8 @@
 </p>
 
 CodexTaskLight 是一个非官方的 macOS 原生小工具。它在桌面显示一个 **40 × 96 点**的竖款迷你悬浮窗，自动关注正在执行或等待你处理的任务，也支持手动固定一个任务，让你不用一直切回聊天窗口。
+
+应用界面目前为中文；顶部语言入口用于切换 README 文档。
 
 ## 效果预览
 
@@ -143,6 +151,18 @@ xcode-select --install
 | [问题与建议](https://github.com/lucifly/CodexTaskLight/issues) | 反馈使用问题或提出功能建议 |
 
 反馈时请提供版本、复现步骤和必要的脱敏截图，不要提交完整的 `~/.codex`、真实聊天日志或访问令牌。
+
+## Star History
+
+<a href="https://www.star-history.com/#lucifly/CodexTaskLight&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lucifly/CodexTaskLight&amp;type=Date&amp;theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lucifly/CodexTaskLight&amp;type=Date">
+    <img src="https://api.star-history.com/svg?repos=lucifly/CodexTaskLight&amp;type=Date" alt="CodexTaskLight 的 GitHub Star 历史图表，由 Star History 动态提供">
+  </picture>
+</a>
+
+图表由 Star History 动态生成，支持深浅色主题。新仓库暂无 Star 时可能没有明显曲线；若图表暂时无法加载，可点击上方图表入口查看。
 
 ## 许可证
 
